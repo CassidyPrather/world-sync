@@ -1,9 +1,9 @@
 ---
-name: vpm-package-template
-description: Cassidy's opinionated template for VRChat projects and VPM packages — Unity main project at root, packages under Packages/, SDK via resolver, AGPL with a linking exception
+name: world-sync
+description: World-space anchoring for VRChat avatar props, built on Freeze To World constraints
 ---
 
-# vpm-package-template
+# world-sync
 
 Unity 2022.3 project at the repository root (the "main project", which is the
 dev harness) with redistributable VPM packages as directories under
@@ -13,8 +13,8 @@ VRChat/Unity linking exception in `LICENSE_ADDENDUM`.
 
 ## Repo Map
 
-- `Assets/` — main-project content: scenes, avatars, world files. Empty in the template.
-- `Packages/net.wirenook.package-template/` — the sample package; disposable, see README → Replacing the demo.
+- `Assets/` — the development harness project's own content; nothing shipped lives here.
+- `Packages/net.wirenook.world-sync/` — the world-anchor editor API and the anchor pin prefab; see README for what it does and does not guarantee.
 - `Packages/com.vrchat.core.bootstrap/` — VRChat's resolver bootstrapper, vendored byte-for-byte. Don't touch.
 - `Packages/vpm-manifest.json` — the main project's VPM dependencies (by default the VRChat Avatars SDK, lilToon, and Modular Avatar; NDMF and `com.vrchat.base` are locked as their dependencies). MA and NDMF don't compile without the SDK, because it ships the `System.Collections.Immutable` and Harmony they use. Edit it with a VPM client (ALCOM / `vrc-get`), not by hand.
 - `Packages/.gitignore` — allowlist inversion keeping resolver-installed packages out of git. Load-bearing.
@@ -24,6 +24,8 @@ VRChat/Unity linking exception in `LICENSE_ADDENDUM`.
 - `.githooks/pre-commit` — the fast checks; opt in with `git config core.hooksPath .githooks`.
 - `Website/index.html` — placeholder package page; unthemed, unpublished, awaiting a future pass.
 - `CREDITS.md` — intake ledger for everything third-party.
+
+This repository is developed inside [cass-avatar](https://github.com/CassidyPrather/cass-avatar), which mounts it and its sibling packages as submodules under `modules/` and opens them all in one Unity project. Generated prefabs and animators are rebuilt from code (`Tools > Wirenook > ...`), never edited by hand.
 
 ## Commands
 
@@ -51,7 +53,7 @@ scripts/build-packages.sh      # VPM .zip + .unitypackage per package -> dist/
 ## House Rules
 
 - Every asset gets a `CREDITS.md` line at intake — source, author, license, URL. CC0 first.
-- Proprietary assets ride the private `Assets/Vendor` submodule, never this repository.
+- Nothing proprietary and nothing licence-incompatible enters this repository; generate or draw it instead.
 - Unity editor stays on 2022.3.22f1, the version VRChat supports. Runtime Unity packages in `Packages/manifest.json` (Timeline, TextMeshPro, AI Navigation, uGUI) stay at the versions the VRChat client ships. Only editor-only tooling (IDE integrations, Test Framework) tracks the latest.
 - Version lives in `package.json`; a release publishes every package whose version matches the tag.
 - The linking exception in `LICENSE_ADDENDUM` is load-bearing legal text. Don't reword it casually.

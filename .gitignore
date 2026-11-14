@@ -64,3 +64,9 @@ Assets/PackageMakerWindowData.asset*
 
 # Build output (scripts/build-packages.sh, scripts/test.sh)
 /dist/
+
+# Python bytecode from the scripts and tools
+__pycache__/
+
+# Blender's automatic backups
+*.blend1

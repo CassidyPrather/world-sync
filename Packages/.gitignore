@@ -7,4 +7,4 @@
 !com.vrchat.core.bootstrap
 
 # Keep this in sync with your package directories under Packages/
-!net.wirenook.package-template
+!net.wirenook.world-sync

@@ -1,0 +1,19 @@
+# Unity serialises scenes, prefabs and assets as YAML that merges badly by
+# line; let Unity's own merge tool handle them where it is configured, and
+# never let git rewrite their line endings.
+*.unity     text eol=lf merge=unityyamlmerge
+*.prefab    text eol=lf merge=unityyamlmerge
+*.asset     text eol=lf merge=unityyamlmerge
+*.mat       text eol=lf merge=unityyamlmerge
+*.anim      text eol=lf merge=unityyamlmerge
+*.controller text eol=lf merge=unityyamlmerge
+*.meta      text eol=lf
+
+*.sh        text eol=lf
+*.py        text eol=lf
+
+*.blend     binary
+*.fbx       binary
+*.png       binary
+*.wav       binary
+*.ttf       binary

@@ -1,22 +1,79 @@
-# VPM Package Template
+# Wirenook World Sync
 
-Cassidy's opinionated template for VRChat avatars, worlds, and the VPM packages
-that ship them. Enter at your own peril.
+Leaves part of a VRChat avatar behind in the world: a prop follows a carry
+point on the avatar until it is dropped, then stays where it was.
+
+Package: `net.wirenook.world-sync`. Needs the VRChat Avatars SDK 3.10.6 or
+newer, [Modular Avatar](https://modular-avatar.nadena.dev/) and
+[`net.wirenook.assets`](https://github.com/CassidyPrather/wirenook-assets).
+
+## What is in it
+
+- **`Prefabs/Wirenook Anchor Pin.prefab`**: a map pin you plant a step in
+  front of you from the menu ("Drop Pin"). Drag it onto an avatar; Modular
+  Avatar wires up the menu, parameter and animator at build time. It costs
+  one synced bit and one constraint.
+- **`WorldAnchor`** (editor API, `Wirenook.WorldSync.Editor`): the building
+  block the pin is made from, for other packages to make their own props
+  droppable. [`avatar-stations`](https://github.com/CassidyPrather/avatar-stations)
+  uses it for its portal.
+
+```csharp
+var anchor = FeaturePrefab.Child(root, "Anchor");
+WorldAnchor.Configure(anchor, carryPoint);      // follow carryPoint until dropped
+WorldAnchor.DropLayer(fx, "My Prop", "My/Param", // pop in, drop, pick up again
+    anchorPath, propBonePath);
+```
+
+## How it works
+
+An anchor is an object with a VRChat Parent Constraint whose only source is
+the carry point. The animator switches the constraint's **Freeze To World**
+option with one synced bool. While frozen, VRChat holds the object at its
+world position on every client.
+
+## What it guarantees, and what it does not
+
+Each viewer's client freezes the anchor when the parameter change reaches
+it, at the place where that viewer sees the carry point at that moment.
+
+- People who are present when the anchor is dropped agree on its position to
+  within network delay. At walking speed that is a few centimetres.
+- Someone who joins, or first loads the avatar, **after** the drop freezes
+  the anchor wherever the wearer is standing at that moment instead. Picking
+  the anchor up and dropping it again puts everyone back in agreement.
+
+Closing that gap needs the anchor's world position itself to be synced,
+which means measuring it on the wearer's client and sending it through
+synced parameters. The SDK 3.10.6 contact receivers can report a sender's
+relative position (`_SenderLocalPositionX/Y/Z`), which makes the measuring
+half practical, but a contact reaches three metres at most, so covering a
+world takes a coarse-to-fine scheme on top. That is not built. Nothing in
+this package claims late-joiner consistency.
+
+None of this has been run in the VRChat client yet; see
+[cass-avatar](https://github.com/CassidyPrather/cass-avatar) for the state of
+in-game testing.
+
+## Rebuilding the generated assets
+
+Everything under `Generated/` and `Prefabs/` is written by
+`Tools > Wirenook > World Sync > Rebuild`
+(`Wirenook.WorldSync.Editor.WorldSyncBuild.Rebuild`). The model comes from
+`blender/`; see `blender/README.md`.
 
 ## Development
 
 Requires Unity 2022.3.22f1 (see `ProjectSettings/ProjectVersion.txt`) via a VPM
-client (prefer [ALCOM](https://vrc-get.anatawa12.com/en/alcom/)).
-Requires [.NET SDK](https://dotnet.microsoft.com/download) 11 for headless checks.
+client (prefer [ALCOM](https://vrc-get.anatawa12.com/en/alcom/)), and the
+[.NET SDK](https://dotnet.microsoft.com/download) 11 for the headless checks.
 
-Open: add this folder as a project in your VPM client, then open in Unity. The
-client installs the defaults pinned in `Packages/vpm-manifest.json`: the
-VRChat Avatars SDK, [lilToon](https://lilxyzw.github.io/lilToon/), and
-[Modular Avatar](https://modular-avatar.nadena.dev/) (with NDMF). Add their
-listings to your client once: `https://lilxyzw.github.io/vpm-repos/vpm.json`
-and `https://vpm.nadena.dev/vpm.json`
-
-Test (editor): Window > General > Test Runner, EditMode tab
+The Unity project at the repository root is the development harness. It
+takes `net.wirenook.assets` from a checkout of
+[wirenook-assets](https://github.com/CassidyPrather/wirenook-assets) beside
+this one (`../wirenook-assets`). The simplest way to get that layout is to
+work in [cass-avatar](https://github.com/CassidyPrather/cass-avatar), which
+mounts this repository and its siblings as submodules under `modules/`.
 
 ```bash
 scripts/check-meta.sh          # every visible file has a committed .meta
@@ -26,119 +83,13 @@ scripts/test.sh                # headless NUnit run of Runtime/Core + Tests
 scripts/build-packages.sh      # VPM .zip + .unitypackage per package -> dist/
 ```
 
-### Advanced
+Pre-commit hook: `git config core.hooksPath .githooks`
 
-Pre-commit hook: `git config core.hooksPath .githooks` (runs the meta and
-manifest checks)
-
-Release:
-
-1. Bump `version` in the package's `package.json`
-2. Commit and push
-3. Create a GitHub release tagged with that version — CI attaches the `.zip`
-   and `.unitypackage` for every package whose version matches the tag
-4. Add the repository to your listing's `githubRepos`
-   ([CassidyPrather/vpm](https://github.com/CassidyPrather/vpm)) once; every
-   later release is picked up from the release assets automatically
-
-## Template Setup
-
-1. **Create a new repository** from this template on GitHub (click "Use this
-   template")
-
-2. **Clone your new repository** and navigate to it
-
-3. **Pick a flavor.** The four supported shapes are avatar *project*, world
-   *project* (yours alone, nothing redistributable), avatar *package*, and
-   world *package* (a redistributable under `Packages/`). The defaults are
-   set up for avatars: `com.vrchat.avatars` 3.10.6 plus Modular Avatar. For a
-   world flavor, use your VPM client to remove Modular Avatar (and the NDMF it
-   pulled in), then swap `com.vrchat.avatars` for `com.vrchat.worlds`. Never
-   install both SDKs; they refuse to coexist. lilToon works in worlds too, so
-   keep it or drop it. SDK 3.10.x is still Unity 2022.3, so ignore any prompt
-   to move the project to Unity 6.
-
-4. **Project, not package?** Gut the package scaffolding:
-   - Delete `Packages/net.wirenook.package-template/`
-   - Remove the `!net.wirenook.package-template` line from `Packages/.gitignore`
-   - Remove `net.wirenook.package-template` from `testables` in
-     `Packages/manifest.json`
-   - Delete the `build-and-publish` job from `.github/workflows/ci-cd.yml`,
-     plus `scripts/build-packages.sh` and `scripts/unitypackage.py`
-   - Everything else stays: the checks and headless tests degrade cleanly to
-     "nothing to do" until you give them something, and the meta check earns
-     its keep on `Assets/` alone
-
-5. **Package? Rename the sample** everywhere its name is hardcoded:
-   - The `Packages/net.wirenook.package-template/` directory itself
-   - `package.json`: `name`, `displayName`, `description`, and `author`
-   - Both `.asmdef` file names and their `name` fields, and the Tests asmdef's
-     reference to the Runtime assembly
-   - The `!net.wirenook.package-template` line in `Packages/.gitignore`
-   - The `testables` entry in `Packages/manifest.json`
-   - Declare the SDK in `vpmDependencies`, e.g.
-     `"com.vrchat.avatars": "^3.10.6"`, plus whichever default packages your
-     code actually uses, e.g. `"nadena.dev.modular-avatar": "^1.18.7"`. The
-     project-level defaults don't carry over to people who install your
-     package, so anything you depend on has to be declared here.
-
-6. **Vendored proprietary assets** — keep or strip:
-   - Keep: create a *private* repository for the assets and mount it:
-     `git submodule add <private-remote> Assets/Vendor`. Open Unity once,
-     commit the generated `Assets/Vendor.meta`, and from then on
-     `git clone --recurse-submodules` Just Works. See Vendored assets below.
-   - Strip: delete the Vendored assets section from this README. That's it —
-     the mechanism is git itself, so there is nothing else to remove.
-
-7. **Update the README**: replace the title and description, remove or
-   customize this Template Setup section
-
-8. **Verify everything works**:
-
-   ```bash
-   scripts/check-meta.sh
-   scripts/check-manifests.py
-   scripts/test.sh
-   scripts/build-packages.sh
-   ```
-
-### Replacing the demo
-
-The sample package exists so the template ships exercised, not because it is
-precious. Its full blast radius, in gutting order:
-
-1. `Runtime/Core/Easing.cs` — replace wholesale. Keep the shape: pure C#, no
-   UnityEngine, no SDK. Everything in `Runtime/Core/` is compiled by
-   `scripts/test.sh` against nothing but the standard library and NUnit, so a
-   stray engine reference there fails CI — that is the fence working, not a
-   bug.
-2. `Tests/Editor/EasingTests.cs` — rewrite against your logic. Stick to the
-   classic asserts; the same files run under `dotnet test` in CI and the Unity
-   Test Runner in the editor.
-3. `Editor/PackageTemplateMenu.cs` — demo-specific; replace or delete.
-4. `Runtime/` outside `Core/` is where MonoBehaviours and SDK-facing glue go.
-   CI compiles none of it, the editor all of it.
-
-Nothing else references the demo.
-
-See [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) for curated links:
-tooling, docs, avatar frameworks, asset sources, and so on and so forth.
-
-## Vendored assets
-
-Proprietary assets — store purchases, licensed packs — must never be published
-in this repository. They live in a *private* repository mounted as a submodule
-at `Assets/Vendor`; clone with `--recurse-submodules` and they Just Work.
-Because `.unitypackage` imports preserve GUIDs, anyone who imports their own
-licensed copy of the same pack gets the same GUIDs — so references from
-committed prefabs and scenes into vendored assets survive for people who can't
-see your submodule at all.
-
-Clones without access still open fine: git leaves `Assets/Vendor` empty and
-Unity shrugs. CI clones without submodules on purpose — it is the standing
-proof that nothing tracked *requires* the private half. Record each pack in
-[CREDITS.md](CREDITS.md), license column included, even though the bytes stay
-private.
+Release: bump `version` in the package's `package.json`, commit and push,
+then create a GitHub release tagged with that version. CI attaches the `.zip`
+and `.unitypackage`; the listing at
+[CassidyPrather/vpm](https://github.com/CassidyPrather/vpm) picks them up
+once this repository is in its `githubRepos`.
 
 ## Legal
 
@@ -160,4 +111,4 @@ respects. (This exception also in `LICENSE_ADDENDUM`.)
 Descended from https://github.com/vrchat-community/template-package
 ([VRCHAT DISTRO LICENSE FILE](https://github.com/vrchat-community/template-package/blob/d9cf13fe9f56867cbf7315a4dbbf1901bc1537ec/Packages/com.vrchat.core.bootstrap/License.md))
 
-Vendored third-party material is inventoried in [CREDITS.md](CREDITS.md).
+Third-party material is inventoried in [CREDITS.md](CREDITS.md).
