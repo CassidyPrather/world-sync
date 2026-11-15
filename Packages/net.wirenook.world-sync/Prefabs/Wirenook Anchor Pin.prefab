@@ -1709,6 +1709,7 @@ MonoBehaviour:
   id: anchor-pin
   label: World pin
   icon: {fileID: 2800000, guid: 124095e1296d3a846b52ef20647ec686, type: 3}
+  summaryIcon: {fileID: 2800000, guid: 124095e1296d3a846b52ef20647ec686, type: 3}
   tag: world pin
   tagPriority: 10
   joinAvatarMesh: 0

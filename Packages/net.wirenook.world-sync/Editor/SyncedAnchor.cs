@@ -217,7 +217,8 @@ namespace Wirenook.WorldSync.Editor
             Action<ClipBuilder, string> extras = null)
         {
             var states = PopToggle.Layer(fx, layerName, dropParameter, propPath, extras);
-            AddLayers(fx, dropParameter);
+            // The prop shrinks away where it stands; only then is it let go.
+            AddLayers(fx, dropParameter, PopToggle.DisappearSeconds);
             return states;
         }
 
@@ -225,7 +226,11 @@ namespace Wirenook.WorldSync.Editor
         /// Adds the rig's two layers to a feature's FX controller.
         /// </summary>
         /// <param name="dropParameter">The synced bool that drops the anchor.</param>
-        public void AddLayers(ControllerBuilder fx, string dropParameter)
+        /// <param name="releaseDelay">
+        /// Seconds the anchor stays where it was dropped after the switch goes
+        /// off, for whatever plays in place before it returns to the carry point.
+        /// </param>
+        public void AddLayers(ControllerBuilder fx, string dropParameter, float releaseDelay = 0f)
         {
             fx.Bool(dropParameter).Bool(Ready).Bool("IsLocal").Float(One, 1f);
             foreach (var axis in Axes)
@@ -239,7 +244,7 @@ namespace Wirenook.WorldSync.Editor
             fx.Float(Heading("X")).Float(Heading("Z"), 1f);
 
             DecodeLayer(fx);
-            AnchorLayer(fx, dropParameter);
+            AnchorLayer(fx, dropParameter, releaseDelay);
         }
 
         /// <summary>
@@ -274,7 +279,7 @@ namespace Wirenook.WorldSync.Editor
             return fx.Tree(_prefix + " " + target.name + " " + property, parameter, (low, At(lowMetres)), (high, At(highMetres)));
         }
 
-        private void AnchorLayer(ControllerBuilder fx, string dropParameter)
+        private void AnchorLayer(ControllerBuilder fx, string dropParameter, float releaseDelay)
         {
             var anchorPath = FeaturePrefab.PathTo(_root, _anchor.transform);
 
@@ -328,8 +333,12 @@ namespace Wirenook.WorldSync.Editor
             carried.To(measure).IfTrue(dropParameter).IfTrue("IsLocal");
             measure.To(latch).AfterTime(1f);
             latch.To(published).AfterTime(1f);
+            // Picked up again: stay put for the release delay, then let go.
+            var lingers = releaseDelay > 0f;
+            var leaving = lingers ? layer.State("Leaving", Hold("leaving", true, false, true, releaseDelay)) : release;
             foreach (var state in new[] { measure, latch, published })
-                state.To(release).IfFalse(dropParameter);
+                state.To(leaving).IfFalse(dropParameter);
+            if (lingers) leaving.To(release).AfterTime(1f);
             release.To(carried).IfFalse(dropParameter);
 
             // Everyone else: hold the anchor where it was seen dropped until
@@ -340,8 +349,20 @@ namespace Wirenook.WorldSync.Editor
             carried.To(synced).IfTrue(dropParameter).IfFalse("IsLocal").IfTrue(Ready);
             carried.To(held).IfTrue(dropParameter).IfFalse("IsLocal").IfFalse(Ready);
             held.To(synced).Fade(0.25f).IfTrue(Ready);
-            held.To(carried).IfFalse(dropParameter);
-            synced.To(carried).IfFalse(dropParameter);
+            if (lingers)
+            {
+                var heldLeaving = layer.State("Held Leaving", Hold("held leaving", true, false, true, releaseDelay));
+                var syncedLeaving = layer.State("Synced Leaving", Hold("synced leaving", false, true, false, releaseDelay));
+                held.To(heldLeaving).IfFalse(dropParameter);
+                synced.To(syncedLeaving).IfFalse(dropParameter);
+                heldLeaving.To(carried).AfterTime(1f);
+                syncedLeaving.To(carried).AfterTime(1f);
+            }
+            else
+            {
+                held.To(carried).IfFalse(dropParameter);
+                synced.To(carried).IfFalse(dropParameter);
+            }
         }
 
         private static void Set(VRCAvatarParameterDriver driver, string parameter, float value)
