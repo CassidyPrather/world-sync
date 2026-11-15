@@ -2,6 +2,7 @@
     "name": "Wirenook.WorldSync.Editor",
     "rootNamespace": "Wirenook.WorldSync.Editor",
     "references": [
+        "Wirenook.WorldSync.Runtime",
         "Wirenook.Assets.Runtime",
         "Wirenook.Assets.Editor",
         "nadena.dev.modular-avatar.core"

@@ -19,8 +19,9 @@ namespace Wirenook.WorldSync.Editor
     /// at the drop therefore agree to within network delay, which at walking
     /// speed is centimetres. Someone who joins or first loads the avatar
     /// afterwards freezes it where the wearer is standing at that moment
-    /// instead. The README lists what a fully synchronised position would
-    /// take; nothing here pretends to be that.
+    /// instead. <see cref="SyncedAnchor"/> closes that gap by syncing the
+    /// position itself; this is the cheap version, for props where one
+    /// synced bit matters more than late joiners.
     /// </summary>
     public static class WorldAnchor
     {

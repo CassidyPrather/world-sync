@@ -1,3 +1,4 @@
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 using Wirenook.Assets.Editor;
@@ -10,10 +11,20 @@ namespace Wirenook.WorldSync.Editor
         public const string Package = "Packages/net.wirenook.world-sync";
         public const string PinPrefab = Package + "/Prefabs/Wirenook Anchor Pin.prefab";
 
+        /// <summary>Checks the pin's synced anchor as far as the editor can; see <see cref="SyncedAnchorCheck"/>.</summary>
+        [MenuItem("Tools/Wirenook/World Sync/Verify")]
+        public static string Verify()
+        {
+            var report = SyncedAnchorCheck.Run(PinPrefab, Package + "/Generated/anchor-pin-fx.controller", "WN/Pin");
+            Debug.Log("[world-sync] " + report);
+            return report;
+        }
+
         [MenuItem("Tools/Wirenook/World Sync/Rebuild")]
         public static void Rebuild()
         {
             const string parameter = "WN/Pin";
+            SyncedAnchor.Prepare();
             FeaturePrefab.Edit(PinPrefab, root =>
             {
                 // The pin is planted on the ground a step in front of the wearer.
@@ -21,17 +32,15 @@ namespace Wirenook.WorldSync.Editor
                 carry.transform.localPosition = new Vector3(0f, 0f, 0.6f);
 
                 var anchor = FeaturePrefab.Child(root, "Anchor");
-                WorldAnchor.Configure(anchor, carry.transform);
+                var rig = SyncedAnchor.Configure(root, anchor, carry.transform, parameter);
                 var model = RigidProp.Build(anchor, Package + "/Models/anchor-pin.fbx", Package + "/Generated");
 
                 var fx = ControllerBuilder.Rebuild(Package + "/Generated/anchor-pin-fx.controller");
-                WorldAnchor.DropLayer(fx, "Anchor Pin", parameter,
-                    FeaturePrefab.PathTo(root, anchor.transform),
-                    FeaturePrefab.PathTo(root, FeaturePrefab.Find(model, "AnchorPin")));
+                rig.DropLayers(fx, "Anchor Pin", parameter, FeaturePrefab.PathTo(root, FeaturePrefab.Find(model, "AnchorPin")));
                 fx.Save();
 
                 FeaturePrefab.Merge(root, fx.Controller);
-                FeaturePrefab.Parameters(root, FeaturePrefab.SyncedBool(parameter));
+                FeaturePrefab.Parameters(root, rig.Parameters().Prepend(FeaturePrefab.SyncedBool(parameter)).ToArray());
                 FeaturePrefab.InstallMenu(root);
                 FeaturePrefab.MenuToggle(root, "Drop Pin", "world-anchor", parameter);
                 FeaturePrefab.Describe(root, "anchor-pin", "World pin", "world-anchor", "world pin", 10);
