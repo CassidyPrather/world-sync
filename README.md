@@ -171,8 +171,29 @@ Checked in the editor (`Tools > Wirenook > World Sync > Verify`):
   prefab match what `WorldGrid` requires.
 - **Arithmetic.** Ten headless tests cover the round trip at ranges from
   160 m to 4 km, whether VRChat rounds or truncates the cell index.
+- **The bus**, by `AnchorBusCheck`, run from the package that uses it
+  (shape-collector's `Tools > Wirenook > Shape Collector > Verify`). Two
+  copies of the generated animator play the wearer's client and that of a
+  viewer who arrives after everything is placed. The check stands in for
+  the three things only VRChat provides: it carries out the parameter
+  drivers of each state an animator enters, works out the wearer's two
+  contact readings from where the cursor is said to be, and copies the
+  synced parameters across every so often, floats rounded to eight bits.
+  With six slots it places them all, and the viewer has the whole layout
+  to within 2.9 cm after one turn of the broadcast (5.4 s) when updates
+  arrive every 0.1 s or every 0.45 s, and after 8.4 s when they arrive
+  once a second. With the viewer's floats easing towards new values
+  instead of jumping, one slot in one run needed a second turn. A clear
+  reaches the viewer. All of it holds whether a float copied into an
+  integer is rounded or truncated.
 
 Not checked, because it only runs in the VRChat client:
+
+- **The bus's assumptions.** That a parameter driver on someone else's
+  client copies a synced parameter into an unsynced one; that an avatar's
+  synced parameters arrive together, so a slot's number never arrives
+  ahead of its coordinates; and how often they arrive in a crowded
+  instance. The check assumes the first two and varies the third.
 
 - **Sending.** That a receiver's `_SenderLocalPosition` values are metres
   along its own axes, that local-only contacts on the same avatar see each
