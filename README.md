@@ -84,6 +84,70 @@ there.
 `Runtime/Core/WorldGrid.cs` holds the arithmetic (cell size, blend
 weights, what each reading must be) with tests for the full round trip.
 
+## Many anchors: the bus
+
+A synced anchor costs 66 bits, seven constraints and six contacts for each
+thing it places, and an avatar may sync 256 bits, so three is the most that
+fit and two is the most that leave room for anything else. `AnchorBus`
+places any number of things for the synced cost of one.
+
+```csharp
+SyncedAnchor.Prepare();                               // once, before editing prefabs
+var bus = AnchorBus.Configure(root, "My/Bus", slots: 6, new[] { carryPoint });
+myThing.parent = bus.Pose(1);                         // or constrain to it
+bus.AddLayers(fx, place: "My/Place", clear: "My/Clear", broadcast: "My/Live");
+FeaturePrefab.Parameters(root, bus.Parameters().Concat(mine).ToArray());
+```
+
+| | `SyncedAnchor` | `AnchorBus` |
+| --- | --- | --- |
+| Synced bits | 66 each | 57 for all |
+| Constraints | 7 each | 5 for all, however many slots |
+| Contacts | 6 each, local-only | 4 for all, local-only |
+| Heading | Synced | None: slots stand upright in the world's axes |
+| People present when it is placed | See it within about a second | See it on the broadcast's next turn |
+| People who arrive later | See it at once | See it within one turn |
+| Kept between sessions | No | Yes, with the avatar |
+
+It has three parts.
+
+**A cursor.** One object follows the wearer and is the only thing ever
+measured. To place a slot, the wearer's client freezes the cursor, reads
+its coordinates exactly as a synced anchor reads its anchor (cell, then
+place within the cell), and copies them into that slot's own parameters.
+That takes 0.7 s.
+
+**Slots.** Each slot's coordinates are six parameters and a "placed" flag
+of its own. They are not synced, which is why they cost nothing; on the
+wearer's client they are saved with the avatar, so a layout survives
+changing avatars and restarting. Every client moves each slot from its own
+copy of those parameters, through the same blend trees a synced anchor
+uses.
+
+**A channel.** One set of synced parameters holds one slot's coordinates
+and a number saying whose they are. The wearer's client loads a slot's
+coordinates, waits, raises the slot's number, holds it, lowers it, and goes
+on to the next slot, round and round for as long as it is asked to
+broadcast. Every other client that hears a number copies the coordinates
+beside it into its own copy of that slot. One turn takes just under a
+second per slot.
+
+The order of those steps is what makes it safe. At every instant the
+number is up, the coordinates beside it are that slot's, so a client that
+receives both in one update can never pair a number with another slot's
+coordinates, however rarely updates arrive. A listener also waits a fifth
+of a second after hearing a number before it copies, in case its client
+eases synced floats towards new values rather than jumping. If updates
+come less often than a number stays up (half a second), a listener can
+miss a slot on one turn and catch it on a later one.
+
+What another slot costs is seven unsynced parameters, two objects, six
+small blend trees and nine animator states. Nobody would draw that by
+hand, and nobody has to.
+
+Used by [shape-collector](https://github.com/CassidyPrather/shape-collector),
+which is why it exists.
+
 ### Compared with earlier approaches
 
 [JuzoVR's WorldSync](https://github.com/JuzoVR/WorldSync) and
