@@ -18,6 +18,9 @@ newer, [Modular Avatar](https://modular-avatar.nadena.dev/) and
   [`avatar-stations`](https://github.com/CassidyPrather/avatar-stations).
 - **`WorldAnchor`**: the same without syncing, for props where one synced
   bit matters more than late joiners.
+- **`AimedCarry`**: a carry point that is aimed. Give it to an anchor in
+  place of a point in front of the wearer and the prop is put down where a
+  hand points. See [Aiming](#aiming).
 
 ```csharp
 SyncedAnchor.Prepare();                          // once, before editing prefabs
@@ -83,6 +86,47 @@ there.
 
 `Runtime/Core/WorldGrid.cs` holds the arithmetic (cell size, blend
 weights, what each reading must be) with tests for the full round trip.
+
+## Aiming
+
+By default a dropped prop appears at its carry point, a step in front of
+the wearer, and is dropped there in the same instant. `AimedCarry` makes
+that two steps. Switching the prop on shows it to the wearer alone,
+standing where the right hand points and turned to face them, and
+following the hand; a fist (a trigger pull, on most controllers) sets it
+down, and from then on the anchor holds it for everyone as before.
+Switching it off before that cancels, and afterwards picks it up.
+
+```csharp
+var aim = AimedCarry.Configure(root, inFront, "My/Prop/Aim");        // inFront: where it goes when the hand points at nothing
+var rig = SyncedAnchor.Configure(root, anchor, aim.Carry, "My/Prop");
+rig.DropLayers(fx, "My Prop", "My/Prop", aim, propPath);             // adds the aim's layers too
+FeaturePrefab.Parameters(root, rig.Parameters().Concat(aim.Parameters())
+    .Prepend(FeaturePrefab.SyncedBool("My/Prop")).ToArray());
+```
+
+- **The ray** is a `VRCRaycast` (version 1.1) along the hand, against the
+  world only, ten metres long, and enabled only while aiming. Every
+  viewer's client casts it from the hand as it sees it, so the aiming
+  itself syncs nothing. It counts as one raycast for performance rank
+  (PC: 1 is Excellent, 4 Good; mobile: 1 and 2).
+- **One synced bit** says "set down". What other people see while the
+  wearer aims is nothing: the prop is drawn for them from the moment it is
+  down.
+- **The heading** is towards the wearer, about the vertical only, however
+  far above or below them the spot is.
+- **The hand is a button while aiming**, and the rig says so with a
+  `WirenookHandClaim` (`net.wirenook.assets`). An avatar that reads those
+  shows no facial expression for the fist that confirms. A hand that is
+  already a fist when the prop comes out has to open first.
+- It costs three constraints and one raycast on top of the anchor's own.
+
+None of this has run in VRChat. Not known: whether a raycast's result is
+in place before constraints read it in the same frame (if not, the preview
+trails the hand by a frame); whether "the world only" includes surfaces a
+given world would rather it did not (triggers, pickups); and how well the
+fist reads as a click on each kind of controller. There is no menu button
+for setting down yet, for controllers that never make a fist.
 
 ## Many anchors: the bus
 

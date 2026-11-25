@@ -223,6 +223,23 @@ namespace Wirenook.WorldSync.Editor
         }
 
         /// <summary>
+        /// The same for a prop that is aimed before it is set down: built on
+        /// an <see cref="AimedCarry"/>'s carry point, it is shown by the
+        /// aim's own "shown" parameter (to the wearer while they aim, to
+        /// everyone once it is down) and dropped by its "set" bit. Adds the
+        /// aim's layers as well.
+        /// </summary>
+        /// <param name="showParameter">The synced bool the menu switches.</param>
+        public PopToggle.States DropLayers(ControllerBuilder fx, string layerName, string showParameter, AimedCarry aim,
+            string propPath, Action<ClipBuilder, string> extras = null)
+        {
+            aim.AddLayers(fx, showParameter);
+            var states = PopToggle.Layer(fx, layerName, aim.Visible, propPath, extras);
+            AddLayers(fx, aim.Dropped, PopToggle.DisappearSeconds);
+            return states;
+        }
+
+        /// <summary>
         /// Adds the rig's two layers to a feature's FX controller.
         /// </summary>
         /// <param name="dropParameter">The synced bool that drops the anchor.</param>
