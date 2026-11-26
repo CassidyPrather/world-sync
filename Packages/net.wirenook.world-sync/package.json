@@ -1,7 +1,7 @@
 {
   "name": "net.wirenook.world-sync",
   "displayName": "Wirenook World Sync",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "unity": "2022.3",
   "description": "World-space anchoring for VRChat avatar props that every viewer sees in the same place.",
   "author": {
@@ -13,7 +13,9 @@
   "vpmDependencies": {
     "com.vrchat.avatars": "^3.10.6",
     "nadena.dev.modular-avatar": "^1.18.7",
-    "net.wirenook.assets": "^0.1.0"
+    "net.wirenook.assets": "^0.2.0"
   },
-  "url": "https://github.com/CassidyPrather/world-sync"
+  "url": "https://github.com/CassidyPrather/world-sync",
+  "documentationUrl": "https://github.com/CassidyPrather/world-sync#readme",
+  "changelogUrl": "https://github.com/CassidyPrather/world-sync/releases"
 }
