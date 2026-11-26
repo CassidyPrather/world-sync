@@ -289,7 +289,7 @@ scripts/build-packages.sh      # VPM .zip + .unitypackage per package -> dist/
 Pre-commit hook: `git config core.hooksPath .githooks`
 
 Release: bump `version` in the package's `package.json`, commit and push,
-then create a GitHub release tagged with that version. CI attaches the `.zip`
+then push a tag named for that version (`v` and the number). CI makes the GitHub release and attaches the `.zip`
 and `.unitypackage`; the listing at
 [CassidyPrather/vpm](https://github.com/CassidyPrather/vpm) picks them up
 once this repository is in its `githubRepos`.

@@ -3,10 +3,10 @@ name: CI/CD Pipeline
 on:
   push:
     branches: [ main ]
+    # A version tag is a release: see build-and-publish.
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main ]
-  release:
-    types: [ published ]
 
 jobs:
   lint-and-test:
@@ -33,10 +33,10 @@ jobs:
 
   build-and-publish:
     needs: lint-and-test
-    if: github.event_name == 'release'
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # Required for uploading release assets
+      contents: write  # Required for creating the release and its assets
     steps:
       - uses: actions/checkout@v7
 
@@ -52,12 +52,20 @@ jobs:
           mkdir -p dist/release
           mv dist/packages/*-"$tag".zip dist/packages/*-"$tag".unitypackage dist/release/
 
-      - name: Upload release assets
-        uses: softprops/action-gh-release@v3
-        with:
-          files: |
-            dist/release/*
-          fail_on_unmatched_files: true
+      # The release is made here, with its assets, rather than by hand first:
+      # a repository with immutable releases takes no assets once a release
+      # is published, and gh uploads them to a draft before publishing it.
+      # A release somebody already made for the tag is filled in instead.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/release/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/release/* \
+              --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
+          fi
 
       # The listing only reads release assets when it builds, so ask it to
       # build now that these are up. Needs a VPM_DISPATCH_TOKEN secret: a
