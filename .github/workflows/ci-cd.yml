@@ -58,3 +58,19 @@ jobs:
           files: |
             dist/release/*
           fail_on_unmatched_files: true
+
+      # The listing only reads release assets when it builds, so ask it to
+      # build now that these are up. Needs a VPM_DISPATCH_TOKEN secret: a
+      # fine-grained token with Contents read/write on CassidyPrather/vpm.
+      - name: Rebuild the VPM listing
+        env:
+          GH_TOKEN: ${{ secrets.VPM_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::VPM_DISPATCH_TOKEN is not set; run Build Repo Listing in CassidyPrather/vpm by hand"
+            exit 0
+          fi
+          gh api repos/CassidyPrather/vpm/dispatches \
+            -f event_type=package-released \
+            -f "client_payload[repository]=$GITHUB_REPOSITORY" \
+            -f "client_payload[tag]=$GITHUB_REF_NAME"
