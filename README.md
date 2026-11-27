@@ -149,7 +149,7 @@ FeaturePrefab.Parameters(root, bus.Parameters().Concat(mine).ToArray());
 | Constraints | 7 each | 5 for all, however many slots |
 | Contacts | 6 each, local-only | 4 for all, local-only |
 | Heading | Synced | None: slots stand upright in the world's axes |
-| People present when it is placed | See it within about a second | See it on the broadcast's next turn |
+| People present when it is placed | See it within about a second | See it within about two seconds |
 | People who arrive later | See it at once | See it within one turn |
 | Kept between sessions | No | Yes, with the avatar |
 
@@ -185,12 +185,30 @@ eases synced floats towards new values rather than jumping. If updates
 come less often than a number stays up (half a second), a listener can
 miss a slot on one turn and catch it on a later one.
 
-What another slot costs is seven unsynced parameters, two objects, six
-small blend trees and nine animator states. Nobody would draw that by
+A slot that has just been placed jumps the queue: the broadcast turns to
+it as soon as it has finished the slot it is on, and goes on round from
+there. So the people present have a new place within a second or two
+however many slots there are, where a whole round is just under a second
+for each slot.
+
+Two parameters on the wearer's client say where a placement has got to,
+for a feature that needs to wait for it: `bus.Pending` is the slot's
+number from the moment it is chosen until its coordinates are stored, and
+`bus.Fresh` is the number of a slot that has been stored and not yet read
+out. While a slot's number is on air and `Fresh` is 0, what is on air is
+where the slot stands now. The game master's kit in
+[adventure-tools](https://github.com/CassidyPrather/adventure-tools) waits
+for exactly that before it shows a thing to anyone, so that nobody sees
+it where it used to stand.
+
+What another slot costs is seven unsynced parameters, three objects, six
+small blend trees and ten animator states. Nobody would draw that by
 hand, and nobody has to.
 
-Used by [shape-collector](https://github.com/CassidyPrather/shape-collector),
-which is why it exists.
+Used by the shape collector of
+[party-tricks](https://github.com/CassidyPrather/party-tricks), which is
+why it exists, and by the game master's kit of
+[adventure-tools](https://github.com/CassidyPrather/adventure-tools).
 
 ### Compared with earlier approaches
 
@@ -216,7 +234,10 @@ Checked in the editor (`Tools > Wirenook > World Sync > Verify`):
 - **Arithmetic.** Ten headless tests cover the round trip at ranges from
   160 m to 4 km, whether VRChat rounds or truncates the cell index.
 - **The bus**, by `AnchorBusCheck`, run from the package that uses it
-  (shape-collector's `Tools > Wirenook > Shape Collector > Verify`). Two
+  (`Tools > Wirenook > Shape Collector > Verify` in party-tricks). Its
+  `Client`, one client's copy of an avatar with the client's work done
+  for it, is public, so a feature built on a bus can play its own layers
+  the same way; adventure-tools does. Two
   copies of the generated animator play the wearer's client and that of a
   viewer who arrives after everything is placed. The check stands in for
   the three things only VRChat provides: it carries out the parameter

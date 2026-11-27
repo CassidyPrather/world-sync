@@ -35,7 +35,10 @@ namespace Wirenook.WorldSync.Editor
     ///            wearer's client puts each slot's coordinates on it in turn,
     ///            round and round, with the slot's number; every other client
     ///            copies what it hears into its own copy of that slot. Someone
-    ///            who arrives late has the whole layout after one turn.
+    ///            who arrives late has the whole layout after one turn. A slot
+    ///            that has just been placed jumps the queue, so the people
+    ///            present have it a second or two after it is set down
+    ///            however many slots there are.
     ///
     /// The cost of another slot is parameters that are not synced and states
     /// in the animator, which is why this is generated and not drawn.
@@ -122,7 +125,22 @@ namespace Wirenook.WorldSync.Editor
         private string CursorLatch(string axis) => _prefix + "/Cursor" + axis + "Latch";
         private string CoarseReading(string axis) => _prefix + "/Coarse_SenderLocalPosition" + axis;
         private string FineReading(string axis) => _prefix + "/Fine_SenderLocalPosition" + axis;
-        private string Pending => _prefix + "/Pending";
+
+        /// <summary>
+        /// On the wearer's client only: the number of the slot being
+        /// placed, from the moment it is chosen until its coordinates have
+        /// been stored, and 0 otherwise. A feature that waits for a
+        /// placement to finish watches it go back to 0.
+        /// </summary>
+        public string Pending => _prefix + "/Pending";
+
+        /// <summary>
+        /// On the wearer's client only: the number of a slot that has been
+        /// stored and not yet read out since, and 0 once the broadcast has
+        /// turned to it. While the slot's number is on air and this is 0,
+        /// what is on air is where the slot stands now.
+        /// </summary>
+        public string Fresh => _prefix + "/Fresh";
 
         /// <summary>
         /// Builds the rig under <paramref name="root"/>.
@@ -240,7 +258,7 @@ namespace Wirenook.WorldSync.Editor
         public void AddLayers(ControllerBuilder fx, string place, string clear, string broadcast, int[] carryFor = null)
         {
             fx.Int(place).Bool(clear).Bool(broadcast).Bool("IsLocal").Float(SyncedAnchor.One, 1f)
-                .Int(Pending).Float(OnAir).Bool(SentPlaced);
+                .Int(Pending).Int(Fresh).Float(OnAir).Bool(SentPlaced);
             foreach (var axis in Axes)
             {
                 // Integers on the network, floats in the animator: blend trees
@@ -381,6 +399,8 @@ namespace Wirenook.WorldSync.Editor
                     }
 
                     changes.Add(Set(Placed(index), 1f));
+                    // Read this one out next.
+                    changes.Add(Set(Fresh, index));
                     Drive(driver, changes.ToArray());
                 });
 
@@ -395,7 +415,12 @@ namespace Wirenook.WorldSync.Editor
             chosen.To(done).Greater(Pending, _slots).Or().Less(Pending, 1);
         }
 
-        /// <summary>The wearer's client reads the layout out, one slot at a time, for as long as it is asked to.</summary>
+        /// <summary>
+        /// The wearer's client reads the layout out, one slot at a time,
+        /// for as long as it is asked to. A slot stored since it was last
+        /// read out (<see cref="Fresh"/>) is taken next, whichever slot's
+        /// turn it was, and the round goes on from there.
+        /// </summary>
         private void BroadcastLayer(ControllerBuilder fx, string broadcast)
         {
             var layer = fx.Layer(_prefix + " Broadcast");
@@ -406,13 +431,14 @@ namespace Wirenook.WorldSync.Editor
             var air = fx.Clip(_prefix + " air", clip => clip.Hold(AirSeconds));
             var gap = fx.Clip(_prefix + " gap", clip => clip.Hold(GapSeconds));
 
-            StateBuilder first = null;
-            StateBuilder previous = null;
+            var loading = new List<StateBuilder>();
+            var resting = new List<StateBuilder>();
+            var jumping = new List<StateBuilder>();
             for (var slot = 1; slot <= _slots; slot++)
             {
                 var index = slot;
-                var loading = layer.State("Load " + slot, load);
-                loading.Behaviour<VRCAvatarParameterDriver>(driver =>
+                var loads = layer.State("Load " + slot, load);
+                loads.Behaviour<VRCAvatarParameterDriver>(driver =>
                 {
                     var changes = new List<VRC_AvatarParameterDriver.Parameter>();
                     foreach (var axis in Axes)
@@ -429,18 +455,35 @@ namespace Wirenook.WorldSync.Editor
                 var rest = layer.State("Gap " + slot, gap);
                 rest.Behaviour<VRCAvatarParameterDriver>(driver => Drive(driver, Set(OnAir, 0f)));
 
-                loading.To(onAir).AfterTime(1f);
+                // The way in for a slot that jumps the queue. It lets go of
+                // the request as it loads: whatever is stored from here on
+                // asks again.
+                var jump = layer.State("Jump " + slot);
+                jump.Behaviour<VRCAvatarParameterDriver>(driver => Drive(driver, Set(Fresh, 0f)));
+                jump.To(loads).AfterTime(0f);
+
+                loads.To(onAir).AfterTime(1f);
                 onAir.To(rest).AfterTime(1f);
-                // Told to stop, it finishes the slot it is on first, so the
-                // number never comes down in the middle of a slot.
-                rest.To(quiet).AfterTime(1f).IfFalse(broadcast);
-                if (previous != null) previous.To(loading).AfterTime(1f).IfTrue(broadcast);
-                previous = rest;
-                first = first ?? loading;
+                loading.Add(loads);
+                resting.Add(rest);
+                jumping.Add(jump);
             }
 
-            previous.To(first).AfterTime(1f).IfTrue(broadcast);
-            quiet.To(first).IfTrue("IsLocal").IfTrue(broadcast);
+            // Transitions are tried in the order they were added. Told to
+            // stop, it finishes the slot it is on first, so the number never
+            // comes down in the middle of a slot; then a slot that has just
+            // been stored; then the next in the round.
+            for (var slot = 1; slot <= _slots; slot++)
+            {
+                var rest = resting[slot - 1];
+                rest.To(quiet).AfterTime(1f).IfFalse(broadcast);
+                for (var fresh = 1; fresh <= _slots; fresh++) rest.To(jumping[fresh - 1]).AfterTime(1f).Equal(Fresh, fresh);
+                rest.To(loading[slot % _slots]).AfterTime(1f).IfTrue(broadcast);
+            }
+
+            for (var fresh = 1; fresh <= _slots; fresh++)
+                quiet.To(jumping[fresh - 1]).IfTrue("IsLocal").IfTrue(broadcast).Equal(Fresh, fresh);
+            quiet.To(loading[0]).IfTrue("IsLocal").IfTrue(broadcast);
         }
 
         /// <summary>Every other client copies what it hears into its own copy of the slot named.</summary>
@@ -518,6 +561,7 @@ namespace Wirenook.WorldSync.Editor
             }
 
             yield return AnimatorOnly(Pending, 0f);
+            yield return AnimatorOnly(Fresh, 0f);
             yield return AnimatorOnly(SyncedAnchor.One, 1f);
 
             // Kept with the avatar on the wearer's client, and never sent:

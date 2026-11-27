@@ -41,7 +41,8 @@ namespace Wirenook.WorldSync.Editor
     /// </summary>
     public static class AnchorBusCheck
     {
-        private const float Step = 0.02f;
+        /// <summary>Seconds one frame of a <see cref="Client"/> lasts.</summary>
+        public const float Step = 0.02f;
         private static readonly string[] Axes = { "X", "Y", "Z" };
 
         private static readonly Vector3[] Places =
@@ -179,12 +180,32 @@ namespace Wirenook.WorldSync.Editor
             return text + (problems.Count == 0 ? "ok" : "FAILED\n  " + string.Join("\n  ", problems.Distinct()));
         }
 
-        /// <summary>One client's copy of the avatar, with the client's work done for it.</summary>
-        private sealed class Client : IDisposable
+        /// <summary>
+        /// One client's copy of the avatar, with the client's work done for
+        /// it. Public so that a feature built on a bus can play its own
+        /// layers the same way: a wearer and a viewer, drivers carried out,
+        /// the channel copied across.
+        /// </summary>
+        public sealed class Client : IDisposable
         {
             public readonly Animator Animator;
             public readonly string Bus;
+
+            /// <summary>Where the bus's cursor is said to be: the readings the wearer's contacts would give are worked out from it.</summary>
             public Vector3 Cursor;
+
+            /// <summary>
+            /// Other synced parameters of the feature's, by name: each
+            /// arrives whole, with the channel, on every
+            /// <see cref="Receive"/>.
+            /// </summary>
+            public readonly List<string> AlsoSynced = new List<string>();
+
+            /// <summary>What a driver that draws a number at random draws from. Seeded, so a check runs the same way twice.</summary>
+            public System.Random Chance = new System.Random(20261126);
+
+            /// <summary>This client's copy of the prefab.</summary>
+            public GameObject Instance => _instance;
 
             private readonly GameObject _instance;
             private readonly bool _local;
@@ -272,6 +293,12 @@ namespace Wirenook.WorldSync.Editor
 
                         Write(change.name, value);
                         break;
+                    case VRC_AvatarParameterDriver.ChangeType.Random:
+                        // Whole numbers for an integer, both ends included, as VRChat draws them.
+                        Write(change.name, _types[change.name] == AnimatorControllerParameterType.Int
+                            ? Chance.Next(Mathf.RoundToInt(change.valueMin), Mathf.RoundToInt(change.valueMax) + 1)
+                            : change.valueMin + (float)Chance.NextDouble() * (change.valueMax - change.valueMin));
+                        break;
                     default:
                         throw new NotSupportedException("The check does not stand in for a driver's " + change.type + ".");
                 }
@@ -313,6 +340,8 @@ namespace Wirenook.WorldSync.Editor
                     _arriving[Bus + "/Tx" + axis] = Mathf.Round(wearer.Animator.GetFloat(Bus + "/Tx" + axis));
                     _arriving[Bus + "/TxFine" + axis] = WorldGrid.Synced(wearer.Animator.GetFloat(Bus + "/TxFine" + axis));
                 }
+
+                foreach (var name in AlsoSynced) Write(name, wearer.Read(name));
             }
 
             /// <summary>Moves this client's synced parameters to what last arrived: at once, or a tenth of a second behind.</summary>
