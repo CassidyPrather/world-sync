@@ -104,6 +104,16 @@ namespace Wirenook.WorldSync.Editor
                     text.AppendLine((truncate ? "truncating" : "rounding") + ": placed " + slots + " slots, the wearer's copies within " +
                                     (worstPlaced * 100f).ToString("0.00") + " cm");
 
+                    // A bus that carries values: each slot is given one of its
+                    // own, which a viewer has to end up with too. Eight bits
+                    // of a synced float is steps of 1/127.
+                    var valued = controller.parameters.Any(parameter => parameter.name == prefix + "/TxValue");
+                    float Wanted(int slot) => 0.1f + 0.8f * slot / slots;
+                    bool Valued(Client client, int slot, float wanted) =>
+                        Mathf.Abs(client.Animator.GetFloat(prefix + "/" + slot + "/Value") - wanted) <= 1f / 127f;
+                    if (valued)
+                        for (var slot = 1; slot <= slots; slot++) wearer.Animator.SetFloat(prefix + "/" + slot + "/Value", Wanted(slot));
+
                     wearer.Animator.SetBool(broadcast, true);
                     Client last = null;
                     foreach (var (interval, eased, turns, required) in new[]
@@ -133,7 +143,8 @@ namespace Wirenook.WorldSync.Editor
                             elapsed += Step;
                             if (complete < 0f && Enumerable.Range(1, slots).All(slot =>
                                     viewer.Animator.GetBool(viewer.Bus + "/" + slot + "/Set") &&
-                                    (viewer.Pose(slot).position - placed[slot - 1]).magnitude <= allowed))
+                                    (viewer.Pose(slot).position - placed[slot - 1]).magnitude <= allowed &&
+                                    (!valued || Valued(viewer, slot, Wanted(slot)))))
                                 complete = elapsed;
                         }
 
@@ -146,9 +157,47 @@ namespace Wirenook.WorldSync.Editor
                         }
                         else
                         {
-                            text.AppendLine(label + "NOT the whole layout after " + elapsed.ToString("0.0") + " s (worst error " + worst.ToString("0.00") + " m)");
+                            var astray = valued ? Enumerable.Range(1, slots).Count(slot => !Valued(viewer, slot, Wanted(slot))) : 0;
+                            text.AppendLine(label + "NOT the whole layout after " + elapsed.ToString("0.0") + " s (worst error " + worst.ToString("0.000") + " m" +
+                                            (valued ? ", " + astray + " values astray" : "") + ")");
                             if (required) problems.Add("A viewer updated every " + interval + " s did not get the layout.");
                         }
+                    }
+
+                    if (valued)
+                    {
+                        // The wearer turns a dial: the slot is read out
+                        // ahead of its turn, however long the round is, and
+                        // only once.
+                        var turned = slots;
+                        wearer.Animator.SetFloat(prefix + "/" + turned + "/Value", 0.05f);
+                        var heard = -1f;
+                        var aired = 0;
+                        var wasOnAir = false;
+                        var sinceUpdate = 0f;
+                        for (var elapsed = 0f; elapsed < 6f; elapsed += Step)
+                        {
+                            wearer.Advance(grid);
+                            sinceUpdate += Step;
+                            if (sinceUpdate >= 0.1f)
+                            {
+                                sinceUpdate = 0f;
+                                last.Receive(wearer);
+                            }
+
+                            last.Ease(false);
+                            last.Advance(grid);
+                            var onAir = Mathf.RoundToInt(wearer.Animator.GetFloat(prefix + "/Slot")) == turned;
+                            if (onAir && !wasOnAir && elapsed < 3f) aired++;
+                            wasOnAir = onAir;
+                            if (heard < 0f && Valued(last, turned, 0.05f)) heard = elapsed;
+                        }
+
+                        if (heard < 0f || heard > 3f)
+                            problems.Add("A value the wearer changed had not reached a viewer after " + (heard < 0f ? "6" : heard.ToString("0.0")) + " s.");
+                        if (slots > 3 && aired > 1)
+                            problems.Add("A value changed once was read out " + aired + " times in three seconds: the request was not let go of.");
+                        text.AppendLine("  a value changed by the wearer: with the viewer after " + heard.ToString("0.0") + " s");
                     }
 
                     // Clearing has to reach a viewer who already has the layout.
@@ -341,6 +390,10 @@ namespace Wirenook.WorldSync.Editor
                     _arriving[Bus + "/TxFine" + axis] = WorldGrid.Synced(wearer.Animator.GetFloat(Bus + "/TxFine" + axis));
                 }
 
+                // A bus that carries values has eight more bits on the channel.
+                if (_types.ContainsKey(Bus + "/TxValue"))
+                    _arriving[Bus + "/TxValue"] = WorldGrid.Synced(wearer.Animator.GetFloat(Bus + "/TxValue"));
+
                 foreach (var name in AlsoSynced) Write(name, wearer.Read(name));
             }
 
@@ -350,7 +403,7 @@ namespace Wirenook.WorldSync.Editor
                 foreach (var arriving in _arriving)
                 {
                     // Whole numbers are never eased; only the fine floats may be.
-                    var smooth = eased && arriving.Key.Contains("/TxFine");
+                    var smooth = eased && (arriving.Key.Contains("/TxFine") || arriving.Key.EndsWith("/TxValue", StringComparison.Ordinal));
                     var held = Animator.GetFloat(arriving.Key);
                     Animator.SetFloat(arriving.Key, smooth ? held + (arriving.Value - held) * Mathf.Min(1f, Step / 0.1f) : arriving.Value);
                 }

@@ -46,6 +46,16 @@ namespace Wirenook.WorldSync.Editor
     /// Slots have a position and stand upright in the world's axes; there is
     /// no heading. <see cref="WorldGrid"/> holds the arithmetic, as it does
     /// for a synced anchor.
+    ///
+    /// A bus can also carry one value for each slot (<see cref="Value"/>):
+    /// a size, a setting, anything that fits in the eight bits a synced
+    /// float travels in. The value rides the channel in its slot's turn, so
+    /// any number of them cost eight synced bits between them, where a
+    /// synced parameter each would cost eight apiece. The price is time: a
+    /// value the wearer changes is read out at the next gap between slots
+    /// (it jumps the queue, after any slot that has just been placed), so
+    /// the people present have it in a second or two, and while a dial is
+    /// being turned they follow it about once a second and not smoothly.
     /// </summary>
     public sealed class AnchorBus
     {
@@ -75,26 +85,45 @@ namespace Wirenook.WorldSync.Editor
         /// <summary>Synced bits the whole bus costs, whatever the number of slots.</summary>
         public const int SyncedBits = 8 + 3 * 8 + 3 * 8 + 1;
 
+        /// <summary>Synced bits the values of every slot cost together, on a bus that carries them.</summary>
+        public const int ValueBits = 8;
+
+        /// <summary>How far a value has to be from what was last read out before it is read out again.</summary>
+        public const float ValueDrift = 0.003f;
+
+        /// <summary>Seconds after asking for a value to be read out before the wearer's client looks at it again.</summary>
+        public const float ValueSettleSeconds = 0.5f;
+
         private readonly GameObject _root;
         private readonly string _prefix;
         private readonly WorldGrid _grid;
         private readonly int _slots;
+        private readonly float[] _values;
 
         private GameObject _cursor;
         private Transform _cursorCell;
         private readonly List<Transform> _cells = new List<Transform>();
         private readonly List<Transform> _poses = new List<Transform>();
 
-        private AnchorBus(GameObject root, string prefix, int slots, float range)
+        private AnchorBus(GameObject root, string prefix, int slots, float range, float[] values)
         {
             if (slots < 1 || slots > 250) throw new ArgumentOutOfRangeException(nameof(slots), "A bus carries 1 to 250 slots.");
+            if (values != null && values.Length != slots)
+                throw new ArgumentException("A bus that carries values needs one resting value for each of its " + slots + " slots.", nameof(values));
             _root = root;
             _prefix = prefix;
             _slots = slots;
+            _values = values;
             _grid = new WorldGrid(range);
         }
 
         public int Slots => _slots;
+
+        /// <summary>Whether each slot has a value beside its place.</summary>
+        public bool HasValues => _values != null;
+
+        /// <summary>Synced bits this bus costs.</summary>
+        public int Bits => SyncedBits + (HasValues ? ValueBits : 0);
         public WorldGrid Grid => _grid;
 
         /// <summary>The object that is measured. It follows the carry points given to <see cref="Configure"/>.</summary>
@@ -119,6 +148,28 @@ namespace Wirenook.WorldSync.Editor
 
         /// <summary>True once slot <paramref name="slot"/> has been placed, on every client that knows it has.</summary>
         public string Placed(int slot) => _prefix + "/" + slot + "/Set";
+
+        /// <summary>
+        /// The slot's value, 0 to 1, on a bus that carries them: a float
+        /// that is not synced. On the wearer's client it is theirs to set
+        /// (a dial in the menu will do, and it is saved with the avatar);
+        /// on every other client it is what the channel last said. Read it
+        /// under this one name everywhere.
+        /// </summary>
+        public string Value(int slot) => _prefix + "/" + slot + "/Value";
+
+        /// <summary>The channel's eight bits for the value of the slot on air.</summary>
+        public string SentValue => _prefix + "/TxValue";
+
+        /// <summary>
+        /// On the wearer's client only: the number of a slot whose value
+        /// has changed since it was last read out, and 0 once the
+        /// broadcast has turned to it.
+        /// </summary>
+        public string Stale => _prefix + "/Stale";
+
+        private string Aired(int slot) => _prefix + "/" + slot + "/ValueAired";
+        private string Drift(int slot) => _prefix + "/" + slot + "/ValueDrift";
 
         // The cursor's measurement, on the wearer's client only.
         private string CursorCell(string axis) => _prefix + "/Cursor" + axis;
@@ -153,10 +204,15 @@ namespace Wirenook.WorldSync.Editor
         /// which one each slot is placed from.
         /// </param>
         /// <param name="range">Metres from the world origin a slot can be placed at, on each axis.</param>
-        public static AnchorBus Configure(GameObject root, string prefix, int slots, Transform[] carryPoints, float range = 512f)
+        /// <param name="values">
+        /// For a bus that carries a value with each slot: what each slot's
+        /// value rests at, 0 to 1, in slot order. Null for a bus without.
+        /// </param>
+        public static AnchorBus Configure(GameObject root, string prefix, int slots, Transform[] carryPoints, float range = 512f,
+            float[] values = null)
         {
             if (carryPoints == null || carryPoints.Length == 0) throw new ArgumentException("A bus needs a carry point.", nameof(carryPoints));
-            var bus = new AnchorBus(root, prefix, slots, range);
+            var bus = new AnchorBus(root, prefix, slots, range, values);
             bus.Build(carryPoints);
             return bus;
         }
@@ -274,10 +330,61 @@ namespace Wirenook.WorldSync.Editor
                 foreach (var axis in Axes) fx.Float(Cell(slot, axis), WorldGrid.OriginIndex).Float(Fine(slot, axis));
             }
 
+            if (HasValues)
+            {
+                fx.Float(SentValue).Int(Stale);
+                for (var slot = 1; slot <= _slots; slot++)
+                    fx.Float(Value(slot), _values[slot - 1]).Float(Aired(slot), _values[slot - 1]).Float(Drift(slot));
+            }
+
             DecodeLayer(fx);
             PlaceLayer(fx, place, clear, carryFor);
             BroadcastLayer(fx, broadcast);
             ListenLayer(fx);
+            if (HasValues) ValueLayers(fx);
+        }
+
+        /// <summary>
+        /// The wearer's client notices a value that is no longer what was
+        /// last read out, and asks for its slot to be read out next. An
+        /// animator cannot compare two parameters, but a blend tree can
+        /// subtract them: one layer keeps, for every slot, the difference
+        /// between its value and what was last on air, and a second waits
+        /// for any of those to leave nought.
+        /// </summary>
+        private void ValueLayers(ControllerBuilder fx)
+        {
+            var motions = new List<Motion>();
+            var weights = new List<string>();
+            for (var slot = 1; slot <= _slots; slot++)
+            {
+                var drift = Drift(slot);
+                motions.Add(fx.Clip(drift + " up", clip => clip.Parameter(drift, 1f)));
+                weights.Add(Value(slot));
+                motions.Add(fx.Clip(drift + " down", clip => clip.Parameter(drift, -1f)));
+                weights.Add(Aired(slot));
+            }
+
+            var tree = fx.Direct(_prefix + " value drift", SyncedAnchor.One, motions.ToArray());
+            var children = tree.children;
+            for (var index = 0; index < children.Length; index++) children[index].directBlendParameter = weights[index];
+            tree.children = children;
+            fx.Layer(_prefix + " Value Drift").State("Drift", tree);
+
+            var layer = fx.Layer(_prefix + " Value Watch");
+            var watching = layer.State("Watching");
+            var settle = fx.Clip(_prefix + " value settle", clip => clip.Hold(ValueSettleSeconds));
+            for (var slot = 1; slot <= _slots; slot++)
+            {
+                var index = slot;
+                var asked = layer.State("Asked " + slot, settle);
+                asked.Behaviour<VRCAvatarParameterDriver>(driver => Drive(driver, Set(Stale, index)));
+                watching.To(asked).IfTrue("IsLocal").Equal(Stale, 0).Greater(Drift(slot), ValueDrift)
+                    .Or().IfTrue("IsLocal").Equal(Stale, 0).Less(Drift(slot), -ValueDrift);
+                // Not before the broadcast has taken the request up, and
+                // then not before what it read out has been noted.
+                asked.To(watching).AfterTime(1f).Equal(Stale, 0);
+            }
         }
 
         /// <summary>Moves the cursor's cell and every slot from their parameters, on every client.</summary>
@@ -434,6 +541,7 @@ namespace Wirenook.WorldSync.Editor
             var loading = new List<StateBuilder>();
             var resting = new List<StateBuilder>();
             var jumping = new List<StateBuilder>();
+            var renewing = new List<StateBuilder>();
             for (var slot = 1; slot <= _slots; slot++)
             {
                 var index = slot;
@@ -448,6 +556,12 @@ namespace Wirenook.WorldSync.Editor
                     }
 
                     changes.Add(Copy(Placed(index), SentPlaced));
+                    if (HasValues)
+                    {
+                        changes.Add(Copy(Value(index), SentValue));
+                        changes.Add(Copy(Value(index), Aired(index)));
+                    }
+
                     Drive(driver, changes.ToArray());
                 });
                 var onAir = layer.State("Air " + slot, air);
@@ -467,22 +581,35 @@ namespace Wirenook.WorldSync.Editor
                 loading.Add(loads);
                 resting.Add(rest);
                 jumping.Add(jump);
+
+                if (HasValues)
+                {
+                    // The same way in, for a slot whose value has changed.
+                    var renew = layer.State("Renew " + slot);
+                    renew.Behaviour<VRCAvatarParameterDriver>(driver => Drive(driver, Set(Stale, 0f)));
+                    renew.To(loads).AfterTime(0f);
+                    renewing.Add(renew);
+                }
             }
 
             // Transitions are tried in the order they were added. Told to
             // stop, it finishes the slot it is on first, so the number never
             // comes down in the middle of a slot; then a slot that has just
-            // been stored; then the next in the round.
+            // been stored; then one whose value has changed; then the next
+            // in the round.
             for (var slot = 1; slot <= _slots; slot++)
             {
                 var rest = resting[slot - 1];
                 rest.To(quiet).AfterTime(1f).IfFalse(broadcast);
                 for (var fresh = 1; fresh <= _slots; fresh++) rest.To(jumping[fresh - 1]).AfterTime(1f).Equal(Fresh, fresh);
+                for (var stale = 1; stale <= renewing.Count; stale++) rest.To(renewing[stale - 1]).AfterTime(1f).Equal(Stale, stale);
                 rest.To(loading[slot % _slots]).AfterTime(1f).IfTrue(broadcast);
             }
 
             for (var fresh = 1; fresh <= _slots; fresh++)
                 quiet.To(jumping[fresh - 1]).IfTrue("IsLocal").IfTrue(broadcast).Equal(Fresh, fresh);
+            for (var stale = 1; stale <= renewing.Count; stale++)
+                quiet.To(renewing[stale - 1]).IfTrue("IsLocal").IfTrue(broadcast).Equal(Stale, stale);
             quiet.To(loading[0]).IfTrue("IsLocal").IfTrue(broadcast);
         }
 
@@ -496,20 +623,29 @@ namespace Wirenook.WorldSync.Editor
             {
                 var index = slot;
                 var hearing = layer.State("Hear " + slot, hear);
-                var take = layer.State("Take " + slot);
-                take.Behaviour<VRCAvatarParameterDriver>(driver =>
+                var take = layer.State("Take " + slot, hear);
+                // A second copy, as long again after the first, while the
+                // number is still up: a client that eases floats is by then
+                // closer to what was sent than a step of the grid, which it
+                // is not always at the first.
+                var retake = layer.State("Retake " + slot);
+                foreach (var copying in new[] { take, retake })
                 {
-                    var changes = new List<VRC_AvatarParameterDriver.Parameter>();
-                    foreach (var axis in Axes)
+                    copying.Behaviour<VRCAvatarParameterDriver>(driver =>
                     {
-                        changes.Add(Copy(Sent(axis), Cell(index, axis)));
-                        changes.Add(Copy(SentFine(axis), Fine(index, axis)));
-                    }
+                        var changes = new List<VRC_AvatarParameterDriver.Parameter>();
+                        foreach (var axis in Axes)
+                        {
+                            changes.Add(Copy(Sent(axis), Cell(index, axis)));
+                            changes.Add(Copy(SentFine(axis), Fine(index, axis)));
+                        }
 
-                    changes.Add(Copy(SentPlaced, Placed(index)));
-                    // On every client but the wearer's: these are the copies.
-                    Drive(driver, false, changes.ToArray());
-                });
+                        changes.Add(Copy(SentPlaced, Placed(index)));
+                        if (HasValues) changes.Add(Copy(SentValue, Value(index)));
+                        // On every client but the wearer's: these are the copies.
+                        Drive(driver, false, changes.ToArray());
+                    });
+                }
 
                 // The number is a float in the animator, so "equal" is a
                 // narrow band round it.
@@ -517,6 +653,8 @@ namespace Wirenook.WorldSync.Editor
                 hearing.To(listening).Less(OnAir, slot - 0.5f).Or().Greater(OnAir, slot + 0.5f);
                 hearing.To(take).AfterTime(1f);
                 take.To(listening).Less(OnAir, slot - 0.5f).Or().Greater(OnAir, slot + 0.5f);
+                take.To(retake).AfterTime(1f);
+                retake.To(listening).Less(OnAir, slot - 0.5f).Or().Greater(OnAir, slot + 0.5f);
             }
         }
 
@@ -562,6 +700,18 @@ namespace Wirenook.WorldSync.Editor
 
             yield return AnimatorOnly(Pending, 0f);
             yield return AnimatorOnly(Fresh, 0f);
+            if (HasValues)
+            {
+                yield return Synced(SentValue, ParameterSyncType.Float, 0f);
+                yield return AnimatorOnly(Stale, 0f);
+                for (var slot = 1; slot <= _slots; slot++)
+                {
+                    yield return Kept(Value(slot), ParameterSyncType.Float, _values[slot - 1]);
+                    yield return AnimatorOnly(Aired(slot), _values[slot - 1]);
+                    yield return AnimatorOnly(Drift(slot), 0f);
+                }
+            }
+
             yield return AnimatorOnly(SyncedAnchor.One, 1f);
 
             // Kept with the avatar on the wearer's client, and never sent:

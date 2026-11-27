@@ -145,7 +145,7 @@ FeaturePrefab.Parameters(root, bus.Parameters().Concat(mine).ToArray());
 
 | | `SyncedAnchor` | `AnchorBus` |
 | --- | --- | --- |
-| Synced bits | 66 each | 57 for all |
+| Synced bits | 66 each | 57 for all, or 65 with a value for each slot |
 | Constraints | 7 each | 5 for all, however many slots |
 | Contacts | 6 each, local-only | 4 for all, local-only |
 | Heading | Synced | None: slots stand upright in the world's axes |
@@ -181,9 +181,12 @@ number is up, the coordinates beside it are that slot's, so a client that
 receives both in one update can never pair a number with another slot's
 coordinates, however rarely updates arrive. A listener also waits a fifth
 of a second after hearing a number before it copies, in case its client
-eases synced floats towards new values rather than jumping. If updates
-come less often than a number stays up (half a second), a listener can
-miss a slot on one turn and catch it on a later one.
+eases synced floats towards new values rather than jumping, and copies a
+second time a fifth of a second after that if the number is still up:
+with fifteen slots, one copy left an easing client a step of the grid out
+on some of them. If updates come less often than a number stays up (half
+a second), a listener can miss a slot on one turn and catch it on a later
+one.
 
 A slot that has just been placed jumps the queue: the broadcast turns to
 it as soon as it has finished the slot it is on, and goes on round from
@@ -202,8 +205,55 @@ for exactly that before it shows a thing to anyone, so that nobody sees
 it where it used to stand.
 
 What another slot costs is seven unsynced parameters, three objects, six
-small blend trees and ten animator states. Nobody would draw that by
+small blend trees and a dozen animator states. Nobody would draw that by
 hand, and nobody has to.
+
+### A value for each slot
+
+A thing set down in the world usually has a setting as well as a place:
+how big it is, which way it faces. As a synced parameter each, those are
+eight bits apiece, and a dozen things would spend most of what an avatar
+may sync on dials. A bus can carry them instead:
+
+```csharp
+var bus = AnchorBus.Configure(root, "My/Bus", slots: 6, new[] { carryPoint },
+    values: new[] { 0.5f, 0.5f, 0f, 0f, 0f, 0f });        // what each slot's value rests at
+fx.Layer("Size").State("Size", sweep).MotionTime(bus.Value(1));   // read it like any float
+```
+
+`bus.Value(slot)` is a float from 0 to 1 that every client has under one
+name and that is not synced. On the wearer's client it is theirs to set,
+with a dial in the menu, and it is saved with the avatar. Everyone
+else's copy is written from the channel, which gains eight bits
+(`bus.SentValue`) that carry the value of whichever slot is on air. So
+every slot's value together costs eight synced bits, whatever the number
+of slots: fifteen things cost 8 where a synced float each would cost 120.
+
+It is time-division, and time is the price:
+
+- **A change is not instant.** The wearer's client notices that a value
+  is no longer what it last read out (a blend tree keeps the difference
+  for every slot, since an animator cannot compare two parameters) and
+  has that slot read out next, after any slot that has just been placed.
+  The people present have it a second or two later. While a dial is
+  being turned they follow it in steps about a second apart, not
+  smoothly.
+- **A late arrival waits a round**, as for the places: just under a
+  second for each slot. Until a slot's turn comes, its value is what it
+  rests at.
+- **Nothing is read out unless the bus is broadcasting.** A feature that
+  only broadcasts while something is set down (the game master's kit)
+  sends a dial turned beforehand when the thing is next set down.
+- **Eight bits**: 255 steps, the same as a synced float.
+- **It leans on the same assumptions as the places**: that a parameter
+  driver copies on other people's clients, and that synced parameters
+  arrive together.
+
+What it suits is anything that changes rarely and may arrive a second
+late. What it does not suit is anything a viewer has to see move with
+the wearer's hand. The channel could carry more than one byte a slot the
+same way, and a slot need not stand for a place at all: a slot nothing
+is ever set down in still has a turn, and its value still travels.
 
 Used by the shape collector of
 [party-tricks](https://github.com/CassidyPrather/party-tricks), which is
@@ -250,7 +300,14 @@ Checked in the editor (`Tools > Wirenook > World Sync > Verify`):
   once a second. With the viewer's floats easing towards new values
   instead of jumping, one slot in one run needed a second turn. A clear
   reaches the viewer. All of it holds whether a float copied into an
-  integer is rounded or truncated.
+  integer is rounded or truncated. On a bus that carries values, each
+  slot is given one of its own and the viewer has to end up with those
+  too; then the wearer changes one, and the viewer must have it within
+  three seconds, read out once and not over and over. With fifteen slots
+  (the kit for The Sunken Crypt in cass-avatar) the layout arrives in
+  one turn of 14.3 s and a changed value in 1.0 s; with updates only
+  once a second, fifteen slots do not all arrive, which the check
+  reports and does not require.
 
 Not checked, because it only runs in the VRChat client:
 

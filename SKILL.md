@@ -14,7 +14,7 @@ VRChat/Unity linking exception in `LICENSE_ADDENDUM`.
 ## Repo Map
 
 - `Assets/` — the development harness project's own content; nothing shipped lives here.
-- `Packages/net.wirenook.world-sync/` — the world-anchor editor API and the anchor pin prefab; see README for what it does and does not guarantee.
+- `Packages/net.wirenook.world-sync/` — the world-anchor editor API and the anchor pin prefab; see README for what it does and does not guarantee. An `AnchorBus` can carry a value for each slot (`values:` in `Configure`, read as `bus.Value(slot)`): eight synced bits for all of them, sent in each slot's turn and ahead of it when the wearer changes one. A size or a heading of something set down belongs there, not in a synced parameter of its own; `AnchorBusCheck` covers it wherever the controller has the channel's `TxValue`.
 - `Packages/com.vrchat.core.bootstrap/` — VRChat's resolver bootstrapper, vendored byte-for-byte. Don't touch.
 - `Packages/vpm-manifest.json` — the main project's VPM dependencies (by default the VRChat Avatars SDK, lilToon, and Modular Avatar; NDMF and `com.vrchat.base` are locked as their dependencies). MA and NDMF don't compile without the SDK, because it ships the `System.Collections.Immutable` and Harmony they use. Edit it with a VPM client (ALCOM / `vrc-get`), not by hand.
 - `Packages/.gitignore` — allowlist inversion keeping resolver-installed packages out of git. Load-bearing.
